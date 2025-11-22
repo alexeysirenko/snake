@@ -7,8 +7,8 @@ use rand::random;
 const SNAKE_HEAD_COLOR: Color = Color::srgb(0.7, 0.7, 0.7);
 const FOOD_COLOR: Color = Color::srgb(1.0, 0.0, 1.0);
 
-const ARENA_HEIGHT: u32 = 10;
-const ARENA_WIDTH: u32 = 10;
+const ARENA_HEIGHT: u32 = 20;
+const ARENA_WIDTH: u32 = 20;
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 struct Position {
@@ -16,6 +16,7 @@ struct Position {
     y: i32,
 }
 
+#[warn(dead_code)]
 #[derive(Component)]
 struct Size {
     width: f32,
@@ -30,8 +31,29 @@ impl Size {
     }
 }
 
+#[derive(PartialEq, Copy, Clone)]
+enum Direction {
+    Left,
+    Up,
+    Right,
+    Down,
+}
+
+impl Direction {
+    fn opposite(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+            Self::Up => Self::Down,
+            Self::Down => Self::Up,
+        }
+    }
+}
+
 #[derive(Component)]
-struct SnakeHead;
+struct SnakeHead {
+    direction: Direction,
+}
 
 #[derive(Component)]
 struct Food;
@@ -41,30 +63,62 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn spawn_snake(mut commands: Commands) {
+    //println!("Spawning snake!");
     commands
-        .spawn(Sprite::from_color(SNAKE_HEAD_COLOR, Vec2::ONE))
-        .insert(SnakeHead)
-        .insert(Position { x: 3, y: 3 })
+        .spawn((
+            Sprite::from_color(SNAKE_HEAD_COLOR, Vec2::ONE),
+            Transform::default(), // Add explicitly
+        ))
+        .insert(SnakeHead {
+            direction: Direction::Up,
+        })
+        .insert(Position {
+            x: ARENA_WIDTH as i32 / 2,
+            y: ARENA_HEIGHT as i32 / 2,
+        })
         .insert(Size::square(0.8));
 }
 
-fn snake_movement(
+fn snake_movement_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut head_positions: Query<&mut Position, With<SnakeHead>>,
+    mut head_positions: Query<&mut SnakeHead>,
 ) {
-    for mut pos in head_positions.iter_mut() {
-        if keyboard_input.pressed(KeyCode::ArrowLeft) {
-            pos.x -= 1;
+    if let Some(mut head) = head_positions.iter_mut().next() {
+        let dir: Direction = if keyboard_input.pressed(KeyCode::ArrowLeft) {
+            Direction::Left
+        } else if keyboard_input.pressed(KeyCode::ArrowRight) {
+            Direction::Right
+        } else if keyboard_input.pressed(KeyCode::ArrowDown) {
+            Direction::Down
+        } else if keyboard_input.pressed(KeyCode::ArrowUp) {
+            Direction::Up
+        } else {
+            head.direction
+        };
+        if dir != head.direction.opposite() {
+            head.direction = dir;
         }
-        if keyboard_input.pressed(KeyCode::ArrowRight) {
-            pos.x += 1;
-        }
-        if keyboard_input.pressed(KeyCode::ArrowDown) {
-            pos.y -= 1;
-        }
-        if keyboard_input.pressed(KeyCode::ArrowUp) {
-            pos.y += 1;
-        }
+    } else {
+        //println!("Head position not found");
+    }
+}
+
+fn snake_movement(mut heads: Query<(&mut Position, &SnakeHead)>) {
+    if let Some((mut head_pos, head)) = heads.iter_mut().next() {
+        match &head.direction {
+            Direction::Left => {
+                head_pos.x -= 1;
+            }
+            Direction::Right => {
+                head_pos.x += 1;
+            }
+            Direction::Up => {
+                head_pos.y += 1;
+            }
+            Direction::Down => {
+                head_pos.y -= 1;
+            }
+        };
     }
 }
 
@@ -75,12 +129,14 @@ fn size_scaling(
     let Ok(window) = window_query.single() else {
         return;
     };
+    let tile_size_x = window.width() / ARENA_WIDTH as f32;
+    let tile_size_y = window.height() / ARENA_HEIGHT as f32;
+    let tile_size = tile_size_x.min(tile_size_y);
+
     for (sprite_size, mut transform) in q.iter_mut() {
-        transform.scale = Vec3::new(
-            sprite_size.width / ARENA_WIDTH as f32 * window.width(),
-            sprite_size.height / ARENA_HEIGHT as f32 * window.height(),
-            1.0,
-        );
+        let scale = tile_size * sprite_size.width;
+        transform.scale = Vec3::new(scale, scale, 1.0);
+        //println!("Scaling entity: scale={}", scale);
     }
 }
 
@@ -101,15 +157,25 @@ fn position_translation(
             convert(pos.y as f32, window.height(), ARENA_HEIGHT as f32),
             0.0,
         );
+        /*
+        println!(
+            "Position: ({}, {}) -> Translation: {:?}",
+            pos.x, pos.y, transform.translation
+        );
+        */
     }
 }
 
 fn food_spawner(mut commands: Commands) {
     commands
-        .spawn(Sprite {
-            color: FOOD_COLOR,
-            ..default()
-        })
+        .spawn((
+            Sprite {
+                color: FOOD_COLOR,
+                custom_size: Some(Vec2::ONE),
+                ..default()
+            },
+            Transform::default(), // Add this!
+        ))
         .insert(Food)
         .insert(Position {
             x: (random::<f32>() * ARENA_WIDTH as f32) as i32,
@@ -123,17 +189,20 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Snake!".to_string(), // <--
-                resolution: (500, 500).into(),
+                resolution: (800, 800).into(),
                 ..default()
             }),
             ..default()
         }))
         .add_systems(Startup, (setup_camera, spawn_snake))
-        .add_systems(Update, snake_movement)
-        .add_systems(PostUpdate, (position_translation, size_scaling))
+        .add_systems(Update, snake_movement_input.before(snake_movement))
         .add_systems(
             FixedUpdate,
-            food_spawner.run_if(on_timer(Duration::from_secs(1))),
+            (
+                food_spawner.run_if(on_timer(Duration::from_secs(1))),
+                snake_movement.run_if(on_timer(Duration::from_millis(500))),
+            ),
         )
+        .add_systems(PostUpdate, (position_translation, size_scaling))
         .run();
 }
