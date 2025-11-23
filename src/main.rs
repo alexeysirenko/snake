@@ -274,7 +274,7 @@ fn food_spawner(
                     custom_size: Some(Vec2::ONE),
                     ..default()
                 },
-                Transform::default(), // Add this!
+                Transform::default(),
             ))
             .insert(Food)
             .insert(food_position)
@@ -331,7 +331,6 @@ fn game_over(
             commands.entity(ent).despawn();
         }
 
-        // Reset score and speed
         game_state.score = 0;
         snake_timer.timer.set_duration(Duration::from_millis(500));
 
@@ -340,8 +339,8 @@ fn game_over(
 }
 
 fn calculate_speed(score: u32) -> Duration {
-    let base_speed = 500.0; // milliseconds
-    let speed = (base_speed - (score as f32 * 10.0)).max(50.0);
+    let base_speed_ms = 500.0;
+    let speed = (base_speed_ms - (score as f32 * 10.0)).max(50.0);
     Duration::from_millis(speed as u64)
 }
 
@@ -375,7 +374,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Snake!".to_string(), // <--
+                title: "Snake!".to_string(),
                 resolution: (800, 800).into(),
                 ..default()
             }),
@@ -384,7 +383,7 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.04, 0.04, 0.04)))
         .insert_resource(SnakeSegments::default())
         .insert_resource(LastTailPosition::default())
-        .insert_resource(SnakeTimer::default()) // Add this
+        .insert_resource(SnakeTimer::default())
         .insert_resource(GameState::default())
         .add_message::<GrowthEvent>()
         .add_message::<GameOverEvent>()
