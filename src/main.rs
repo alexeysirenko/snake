@@ -223,22 +223,34 @@ fn position_translation(
     }
 }
 
-fn food_spawner(mut commands: Commands) {
-    commands
-        .spawn((
-            Sprite {
-                color: FOOD_COLOR,
-                custom_size: Some(Vec2::ONE),
-                ..default()
-            },
-            Transform::default(), // Add this!
-        ))
-        .insert(Food)
-        .insert(Position {
-            x: (random::<f32>() * ARENA_WIDTH as f32) as i32,
-            y: (random::<f32>() * ARENA_HEIGHT as f32) as i32,
-        })
-        .insert(Size::square(0.8));
+fn food_spawner(
+    mut commands: Commands,
+    segments: ResMut<SnakeSegments>,
+    mut positions: Query<&mut Position>,
+) {
+    let food_position = Position {
+        x: (random::<f32>() * ARENA_WIDTH as f32) as i32,
+        y: (random::<f32>() * ARENA_HEIGHT as f32) as i32,
+    };
+
+    if !segments
+        .iter()
+        .map(|e| *positions.get_mut(*e).unwrap())
+        .any(|segment_position| segment_position == food_position)
+    {
+        commands
+            .spawn((
+                Sprite {
+                    color: FOOD_COLOR,
+                    custom_size: Some(Vec2::ONE),
+                    ..default()
+                },
+                Transform::default(), // Add this!
+            ))
+            .insert(Food)
+            .insert(food_position)
+            .insert(Size::square(0.8));
+    }
 }
 
 fn snake_eating(
