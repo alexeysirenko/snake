@@ -20,6 +20,9 @@ struct SnakeSegments(Vec<Entity>);
 #[derive(Message)]
 struct GrowthEvent;
 
+#[derive(Message)]
+struct GameOverEvent;
+
 #[derive(Default, Resource)]
 struct LastTailPosition(Option<Position>);
 
@@ -131,6 +134,7 @@ fn snake_movement_input(
 
 fn snake_movement(
     mut last_tail_position: ResMut<LastTailPosition>,
+    mut game_over_writer: MessageWriter<GameOverEvent>,
     segments: ResMut<SnakeSegments>,
     mut heads: Query<(Entity, &SnakeHead)>,
     mut positions: Query<&mut Position>,
@@ -155,6 +159,16 @@ fn snake_movement(
                 head_pos.y -= 1;
             }
         };
+        if head_pos.x < 0
+            || head_pos.y < 0
+            || head_pos.x as u32 >= ARENA_WIDTH
+            || head_pos.y as u32 >= ARENA_HEIGHT
+        {
+            game_over_writer.write(GameOverEvent);
+        }
+        if segment_positions.contains(&head_pos) {
+            game_over_writer.write(GameOverEvent);
+        }
         segment_positions
             .iter()
             .zip(segments.iter().skip(1))
@@ -254,6 +268,21 @@ fn snake_growth(
     }
 }
 
+fn game_over(
+    mut commands: Commands,
+    mut reader: MessageReader<GameOverEvent>,
+    segments_res: ResMut<SnakeSegments>,
+    food: Query<Entity, With<Food>>,
+    segments: Query<Entity, With<SnakeSegment>>,
+) {
+    if reader.read().next().is_some() {
+        for ent in food.iter().chain(segments.iter()) {
+            commands.entity(ent).despawn();
+        }
+        spawn_snake(commands, segments_res);
+    }
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -268,10 +297,12 @@ fn main() {
         .insert_resource(SnakeSegments::default())
         .insert_resource(LastTailPosition::default())
         .add_message::<GrowthEvent>()
+        .add_message::<GameOverEvent>()
         .add_systems(Startup, (setup_camera, spawn_snake))
         .add_systems(Update, snake_movement_input.before(snake_movement))
         .add_systems(Update, snake_eating.after(snake_movement))
         .add_systems(Update, snake_growth.after(snake_eating))
+        .add_systems(Update, game_over.after(snake_movement))
         .add_systems(
             FixedUpdate,
             (
