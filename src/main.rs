@@ -12,6 +12,27 @@ const ARENA_HEIGHT: u32 = 20;
 const ARENA_WIDTH: u32 = 20;
 
 #[derive(Component)]
+struct ScoreText;
+
+#[derive(Resource, Default)]
+struct GameState {
+    score: u32,
+}
+
+#[derive(Resource)]
+struct SnakeTimer {
+    timer: Timer,
+}
+
+impl Default for SnakeTimer {
+    fn default() -> Self {
+        Self {
+            timer: Timer::new(Duration::from_millis(500), TimerMode::Repeating),
+        }
+    }
+}
+
+#[derive(Component)]
 struct SnakeSegment;
 
 #[derive(Default, Deref, DerefMut, Resource)]
@@ -133,12 +154,20 @@ fn snake_movement_input(
 }
 
 fn snake_movement(
+    time: Res<Time>,
+    mut snake_timer: ResMut<SnakeTimer>,
     mut last_tail_position: ResMut<LastTailPosition>,
     mut game_over_writer: MessageWriter<GameOverEvent>,
     segments: ResMut<SnakeSegments>,
     mut heads: Query<(Entity, &SnakeHead)>,
     mut positions: Query<&mut Position>,
 ) {
+    snake_timer.timer.tick(time.delta());
+
+    if !snake_timer.timer.just_finished() {
+        return;
+    }
+
     if let Some((head_entity, head)) = heads.iter_mut().next() {
         let segment_positions = segments
             .iter()
@@ -274,9 +303,17 @@ fn snake_growth(
     last_tail_position: Res<LastTailPosition>,
     mut segments: ResMut<SnakeSegments>,
     mut growth_reader: MessageReader<GrowthEvent>,
+    mut game_state: ResMut<GameState>,
+    mut snake_timer: ResMut<SnakeTimer>,
 ) {
     if growth_reader.read().next().is_some() {
         segments.push(spawn_segment(commands, last_tail_position.0.unwrap()));
+
+        game_state.score += 1;
+        let new_speed = calculate_speed(game_state.score);
+        snake_timer.timer.set_duration(new_speed);
+
+        println!("Score: {} | Speed: {:?}", game_state.score, new_speed);
     }
 }
 
@@ -286,12 +323,51 @@ fn game_over(
     segments_res: ResMut<SnakeSegments>,
     food: Query<Entity, With<Food>>,
     segments: Query<Entity, With<SnakeSegment>>,
+    mut game_state: ResMut<GameState>,
+    mut snake_timer: ResMut<SnakeTimer>,
 ) {
     if reader.read().next().is_some() {
         for ent in food.iter().chain(segments.iter()) {
             commands.entity(ent).despawn();
         }
+
+        // Reset score and speed
+        game_state.score = 0;
+        snake_timer.timer.set_duration(Duration::from_millis(500));
+
         spawn_snake(commands, segments_res);
+    }
+}
+
+fn calculate_speed(score: u32) -> Duration {
+    let base_speed = 500.0; // milliseconds
+    let speed = (base_speed - (score as f32 * 10.0)).max(50.0);
+    Duration::from_millis(speed as u64)
+}
+
+fn setup_score_text(mut commands: Commands) {
+    commands.spawn((
+        Text::new("Score: 0"),
+        TextFont {
+            font_size: 40.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(10.0),
+            left: Val::Px(10.0),
+            ..default()
+        },
+        ScoreText,
+    ));
+}
+
+fn update_score_text(game_state: Res<GameState>, mut query: Query<&mut Text, With<ScoreText>>) {
+    if game_state.is_changed() {
+        for mut text in query.iter_mut() {
+            text.0 = format!("Score: {}", game_state.score);
+        }
     }
 }
 
@@ -308,19 +384,20 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.04, 0.04, 0.04)))
         .insert_resource(SnakeSegments::default())
         .insert_resource(LastTailPosition::default())
+        .insert_resource(SnakeTimer::default()) // Add this
+        .insert_resource(GameState::default())
         .add_message::<GrowthEvent>()
         .add_message::<GameOverEvent>()
-        .add_systems(Startup, (setup_camera, spawn_snake))
-        .add_systems(Update, snake_movement_input.before(snake_movement))
+        .add_systems(Startup, (setup_camera, spawn_snake, setup_score_text))
+        .add_systems(Update, snake_movement_input)
+        .add_systems(Update, snake_movement.after(snake_movement_input))
         .add_systems(Update, snake_eating.after(snake_movement))
         .add_systems(Update, snake_growth.after(snake_eating))
         .add_systems(Update, game_over.after(snake_movement))
+        .add_systems(Update, update_score_text)
         .add_systems(
             FixedUpdate,
-            (
-                food_spawner.run_if(on_timer(Duration::from_secs(1))),
-                snake_movement.run_if(on_timer(Duration::from_millis(500))),
-            ),
+            (food_spawner.run_if(on_timer(Duration::from_secs(1))),),
         )
         .add_systems(PostUpdate, (position_translation, size_scaling))
         .run();
